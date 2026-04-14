@@ -1,0 +1,12 @@
+{
+  "event": {
+    "DetectionId": "ldt:lab:00000001",
+    "DetectDescription": "Suspicious script execution from unusual path",
+    "SeverityName": "Medium",
+    "ComputerName": "laptop-442",
+    "FileName": "rundll32.exe",
+    "CommandLine": "rundll32.exe javascript:\\\"..\\\\mshtml,RunHTMLApplication \\\"...",
+    "UserName": "DESKTOP\\\\analyst",
+    "ProcessStartTime": 1744410000000
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "ticket_id": "INC-2026-88421",
+  "received_at": "2026-04-13T12:00:00Z",
+  "data": {
+    "event": {
+      "DetectionId": "ldt:demo:wrapped-002",
+      "DetectDescription": "PowerShell with hidden window",
+      "SeverityName": "High",
+      "ComputerName": "ws-09999",
+      "FileName": "powershell.exe",
+      "CommandLine": "powershell.exe -WindowStyle Hidden -File C:\\\\Temp\\\\invoke.ps1",
+      "UserName": "CORP\\\\svc_backup",
+      "SHA256HashData": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "ProcessStartTime": 1744440000000
+    },
+    "metadata": {
+      "eventCreationTime": 1744440000000
+    }
+  }
+}

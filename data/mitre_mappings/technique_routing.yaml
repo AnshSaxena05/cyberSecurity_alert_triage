@@ -1,0 +1,74 @@
+# MITRE ATT&CK Technique to Tool Routing — human-readable reference
+# The authoritative source is services/mitre_router.py (Python dict)
+# This YAML is for documentation and external tooling
+
+version: "1.0"
+last_updated: "2026-04-12"
+
+time_windows:
+  process_execution: 72h
+  auth_login: 336h      # 14 days
+  lateral_movement: 48h
+  c2_beaconing: 720h    # 30 days
+  persistence: 2160h    # 90 days
+  threat_intel: 8760h   # 12 months
+  user_behavior: 2160h  # 90 days
+
+technique_routing:
+  T1003.001:
+    name: "LSASS Memory"
+    tactic: "Credential Access"
+    tools: [query_crowdstrike, query_splunk, lookup_threat_intel]
+    time_window: process_execution
+    priority_tool: query_crowdstrike
+
+  T1071.004:
+    name: "DNS Application Layer Protocol"
+    tactic: "Command and Control"
+    tools: [query_netflow, query_dns_logs, lookup_threat_intel]
+    time_window: c2_beaconing
+
+  T1486:
+    name: "Data Encrypted for Impact"
+    tactic: "Impact"
+    tools: [query_crowdstrike, query_splunk, query_backup_systems]
+    time_window: process_execution
+    priority_tool: query_crowdstrike
+    sequential: true
+
+  T1490:
+    name: "Inhibit System Recovery"
+    tactic: "Impact"
+    tools: [query_crowdstrike, query_splunk, query_backup_systems]
+    time_window: process_execution
+    priority_tool: query_crowdstrike
+
+  T1078.004:
+    name: "Valid Accounts: Cloud Accounts"
+    tactic: "Privilege Escalation"
+    tools: [query_aws, query_splunk, lookup_threat_intel]
+    time_window: auth_login
+
+  T1098:
+    name: "Account Manipulation"
+    tactic: "Privilege Escalation"
+    tools: [query_splunk, query_aws, query_cmdb]
+    time_window: auth_login
+
+  T1053.005:
+    name: "Scheduled Task/Job: Scheduled Task"
+    tactic: "Persistence"
+    tools: [query_crowdstrike, query_splunk]
+    time_window: persistence
+
+  T1110.001:
+    name: "Brute Force: Password Guessing"
+    tactic: "Credential Access"
+    tools: [query_splunk, query_cmdb]
+    time_window: auth_login
+
+  T1021.001:
+    name: "Remote Services: Remote Desktop Protocol"
+    tactic: "Lateral Movement"
+    tools: [query_netflow, query_splunk, query_cmdb]
+    time_window: lateral_movement

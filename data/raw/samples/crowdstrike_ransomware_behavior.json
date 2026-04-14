@@ -1,0 +1,20 @@
+{
+  "event": {
+    "DetectionId": "ldt:prod:deadbeef0001",
+    "DetectDescription": "Ransomware encryption activity detected",
+    "SeverityName": "Critical",
+    "Technique": "Data Encrypted for Impact",
+    "Tactic": "Impact",
+    "ComputerName": "FILESERVER-03",
+    "FileName": "svchost.exe",
+    "FilePath": "C:\\\\Windows\\\\Temp\\\\svchost.exe",
+    "CommandLine": "svchost.exe -k netsvcs -p -s Schedule",
+    "UserName": "NT AUTHORITY\\\\SYSTEM",
+    "RemoteAddress": "198.51.100.77",
+    "RemotePort": "443",
+    "ProcessStartTime": 1744432200000
+  },
+  "metadata": {
+    "eventCreationTime": 1744432200000
+  }
+}

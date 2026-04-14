@@ -1,0 +1,14 @@
+{
+  "event": {
+    "DetectionId": "ldt:demo:001",
+    "DetectDescription": "Suspicious PowerShell",
+    "SeverityName": "High",
+    "ComputerName": "ws-01234",
+    "FileName": "powershell.exe",
+    "CommandLine": "powershell -enc AAABBB",
+    "UserName": "CORP\\jdoe"
+  },
+  "metadata": {
+    "eventCreationTime": 1744428600000
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "version": "1.0",
+  "description": "Golden test alerts from the SOC AI context document — 6 Splunk alert samples",
+  "alerts": [
+    {
+      "id": "golden-001",
+      "label": "DNS Tunnelling",
+      "expected_severity": "HIGH",
+      "expected_escalation": "ESCALATE_IR",
+      "expected_techniques": ["T1071.004"],
+      "source": "splunk",
+      "payload": {
+        "search_name": "DNS Tunneling Detection - High Entropy TXT Queries",
+        "result": {
+          "_time": "2026-04-12T04:15:00Z",
+          "urgency": "high",
+          "host": "workstation-045",
+          "src_ip": "10.10.5.45",
+          "dest_ip": "185.220.101.45",
+          "message": "Detected 847 high-entropy DNS TXT queries from workstation-045 to external resolver 185.220.101.45 over 6 hours. Total DNS traffic: 44MB. Query strings show base64 encoding patterns consistent with DNS tunnelling.",
+          "technique_id": "T1071.004",
+          "mitre_tactic": "Command and Control",
+          "bytes_out": 44040192,
+          "query_count": 847,
+          "avg_entropy": 4.2
+        }
+      }
+    },
+    {
+      "id": "golden-002",
+      "label": "Ransomware Pre-Stage",
+      "expected_severity": "CRITICAL",
+      "expected_escalation": "ESCALATE_IR",
+      "expected_techniques": ["T1486", "T1490"],
+      "source": "crowdstrike",
+      "payload": {
+        "event": {
+          "DetectionId": "ldt:abc123def456:789",
+          "DetectDescription": "Ransomware pre-staging: 4200 files renamed with .locked extension and shadow copies deleted",
+          "SeverityName": "Critical",
+          "Technique": "Data Encrypted for Impact",
+          "Tactic": "Impact",
+          "ComputerName": "fileserver-01",
+          "FileName": "powershell.exe",
+          "FilePath": "C:\\Windows\\System32",
+          "CommandLine": "vssadmin delete shadows /all /quiet && powershell -enc [base64 payload]",
+          "UserName": "svc-backup",
+          "ProcessStartTime": "1744427700000",
+          "SHA256HashData": "a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890a1b2c3d4e5f67890",
+          "MD5HashData": "d41d8cd98f00b204e9800998ecf8427e"
+        },
+        "metadata": {
+          "eventCreationTime": 1744427700000,
+          "offset": 12345
+        }
+      }
+    },
+    {
+      "id": "golden-003",
+      "label": "AWS IAM Privilege Escalation",
+      "expected_severity": "HIGH",
+      "expected_escalation": "ESCALATE_IR",
+      "expected_techniques": ["T1078.004", "T1098"],
+      "source": "aws_guardduty",
+      "payload": {
+        "detail-type": "GuardDuty Finding",
+        "source": "aws.guardduty",
+        "region": "us-east-1",
+        "detail": {
+          "id": "abc-def-ghi-123",
+          "title": "Credentials used from external IP to attach AdministratorAccess policy",
+          "description": "IAM user 'dev-cicd-bot' attached AdministratorAccess policy to itself from IP 193.42.60.195 (Russia). This IP has not previously been seen accessing this account.",
+          "severity": 8.5,
+          "type": "Persistence:IAMUser/AnomalousBehavior",
+          "accountId": "123456789012",
+          "region": "us-east-1",
+          "updatedAt": "2026-04-12T03:22:00Z",
+          "resource": {
+            "resourceType": "AccessKey",
+            "accessKeyDetails": {
+              "userName": "dev-cicd-bot",
+              "accessKeyId": "AKIAIOSFODNN7EXAMPLE"
+            }
+          },
+          "service": {
+            "action": {
+              "networkConnectionAction": {
+                "remoteIpDetails": {
+                  "ipAddressV4": "193.42.60.195",
+                  "country": {"countryName": "Russia"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "golden-004",
+      "label": "Scheduled Task Non-Admin",
+      "expected_severity": "MEDIUM",
+      "expected_escalation": "MONITOR",
+      "expected_techniques": ["T1053.005"],
+      "source": "splunk",
+      "payload": {
+        "search_name": "Suspicious Scheduled Task Creation via Browser Process",
+        "result": {
+          "_time": "2026-04-12T09:45:00Z",
+          "urgency": "medium",
+          "host": "laptop-198",
+          "user": "CORP\\jsmith",
+          "process_name": "schtasks.exe",
+          "parent_process_name": "chrome.exe",
+          "cmdline": "schtasks /create /tn UpdaterTask /tr C:\\Users\\jsmith\\AppData\\Local\\Temp\\update.exe /sc hourly",
+          "technique_id": "T1053.005",
+          "mitre_tactic": "Persistence",
+          "message": "schtasks.exe spawned by chrome.exe — non-admin user creating hourly scheduled task pointing to temp directory. AV detection: 1/68 engines."
+        }
+      }
+    },
+    {
+      "id": "golden-005",
+      "label": "Mimikatz Credential Dump with TOR C2",
+      "expected_severity": "CRITICAL",
+      "expected_escalation": "ESCALATE_IR",
+      "expected_techniques": ["T1003.001", "T1071.001"],
+      "source": "crowdstrike",
+      "payload": {
+        "event": {
+          "DetectionId": "ldt:xyz987:654321",
+          "DetectDescription": "Renamed mimikatz binary executed LSASS memory dump; TOR exit node C2 communication detected on port 443",
+          "SeverityName": "Critical",
+          "Technique": "OS Credential Dumping: LSASS Memory",
+          "Tactic": "Credential Access",
+          "ComputerName": "dc01",
+          "FileName": "svchost32.exe",
+          "FilePath": "C:\\ProgramData\\Temp",
+          "CommandLine": "svchost32.exe privilege::debug sekurlsa::logonpasswords exit",
+          "UserName": "DOMAIN\\svc-monitoring",
+          "SHA256HashData": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "RemoteAddress": "185.220.101.34",
+          "RemotePort": 443,
+          "ProcessStartTime": "1744428600000"
+        },
+        "metadata": {
+          "eventCreationTime": 1744428600000,
+          "offset": 99999
+        }
+      }
+    },
+    {
+      "id": "golden-006",
+      "label": "SSH Brute Force Low Confidence",
+      "expected_severity": "LOW",
+      "expected_escalation": "MONITOR",
+      "expected_techniques": ["T1110.001"],
+      "source": "splunk",
+      "payload": {
+        "search_name": "SSH Brute Force Detection",
+        "result": {
+          "_time": "2026-04-12T08:30:00Z",
+          "urgency": "low",
+          "host": "devbox-12",
+          "src_ip": "10.10.1.5",
+          "dest_ip": "10.10.1.12",
+          "dest_port": 22,
+          "user": "root",
+          "technique_id": "T1110.001",
+          "mitre_tactic": "Credential Access",
+          "message": "5 failed SSH authentication attempts from 10.10.1.5 to 10.10.1.12 over 2 minutes. Source is internal developer laptop (asset known-good). No successful login. No prior malicious activity on source host."
+        }
+      }
+    }
+  ]
+}

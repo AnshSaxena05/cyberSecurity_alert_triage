@@ -1,0 +1,89 @@
+# Compose file format version (not Python).
+version: "3.9"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # SOC Triage Agent — FastAPI application
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: soc-triage-app
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_ENABLED=true
+      - CACHE_TTL_SECONDS=900
+      - LOG_LEVEL=INFO
+      - ENVIRONMENT=development
+      # Override these in .env or via docker secret
+      - API_KEY=${API_KEY:-change-me-in-production}
+      - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - OTX_API_KEY=${OTX_API_KEY:-}
+      - SPLUNK_HOST=${SPLUNK_HOST:-localhost}
+      - SPLUNK_TOKEN=${SPLUNK_TOKEN:-}
+      - CROWDSTRIKE_CLIENT_ID=${CROWDSTRIKE_CLIENT_ID:-}
+      - CROWDSTRIKE_CLIENT_SECRET=${CROWDSTRIKE_CLIENT_SECRET:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-false}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+      - ./evaluation/eval_results:/app/evaluation/eval_results
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Redis — IOC result cache (15-minute TTL per architecture spec)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: soc-triage-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Ollama — local LLM server (Foundation-Sec-8B + llama3.2:3b)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: soc-triage-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_KEEP_ALIVE=-1
+    restart: unless-stopped
+    # Pull both required models on first start
+    # Run manually: docker exec soc-triage-ollama ollama pull llama3.2:3b
+    # and: docker exec soc-triage-ollama ollama pull axonvertex/Foundation-Sec-8B-Reasoning-Q8_0-GGUF:Q8_0_24K
+
+volumes:
+  redis_data:
+  ollama_models:

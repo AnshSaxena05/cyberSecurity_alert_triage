@@ -11,6 +11,7 @@ packages = [
     "evaluation",
     "observability",
     "prompts",
+    "schemas",
     "security",
     "services",
     "tests",
@@ -44,6 +45,12 @@ dependencies = [
     "tenacity>=8.3.0",
     "orjson>=3.10.0",
     "langfuse>=3.3.3",
+    # Architecture-2 runtime additions
+    "nats-py>=2.9.0",
+    "pyjwt>=2.9.0",
+    "langgraph-checkpoint-redis>=0.0.3",
+    "opentelemetry-exporter-otlp>=1.25.0",
+    "asyncpg>=0.30.0",
 ]
 
 [project.optional-dependencies]
@@ -66,6 +73,9 @@ select = ["E", "F", "I", "UP"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: tests that require docker-compose.dev.yml (NATS/Redis/Postgres) running",
+]
 
 [tool.mypy]
 python_version = "3.14"

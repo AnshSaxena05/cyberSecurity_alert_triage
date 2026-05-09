@@ -1,0 +1,157 @@
+# docker-compose.dev.yml
+#
+# Architecture-2 development stack.
+#
+# This compose file is for engineers who DON'T already have NATS/Redis running
+# locally. If you already have them as host services, set the env vars in
+# .env.dev (see .env.dev.example) and skip this file entirely.
+#
+# Usage:
+#     docker compose -f docker-compose.dev.yml up nats redis     # minimal
+#     docker compose -f docker-compose.dev.yml up                # full stack
+#     docker compose -f docker-compose.dev.yml down -v           # wipe state
+#
+# Profiles:
+#   default     nats + redis (the minimum to run ingest + worker)
+#   audit       + clickhouse (OTel traces, audit aggregation) — only if you
+#               don't already have ClickHouse running
+#   regulated   + postgres (only needed if a tenant requires PG checkpoint
+#               instead of Redis; default v1 uses AsyncRedisSaver everywhere)
+#
+# What's intentionally NOT here:
+#   - Ollama (use the production docker-compose.yml for LLMs).
+#   - The FastAPI app itself (run with `make api`).
+#   - The worker process (run with `make worker` once it lands).
+#   - Cloudflare Durable Object simulator (week 4).
+
+name: soc-triage-dev
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    container_name: soc-triage-nats
+    ports:
+      - "4222:4222"   # client connections
+      - "8222:8222"   # HTTP monitoring
+      - "8443:8443"   # WebSocket (DO bridge talks here)
+    command:
+      - "--name=soc-triage-nats"
+      - "--http_port=8222"
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--config=/etc/nats/nats.conf"
+    volumes:
+      - nats_data:/data
+      - ./infra/nats/nats.conf:/etc/nats/nats.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz | grep -q ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: soc-triage-redis
+    ports:
+      - "6379:6379"
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--appendfsync"
+      - "everysec"
+      - "--save"
+      - "300 1"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Bootstrap container that creates the 5 streams + a default tenant cred
+  # against the running nats container, then exits. Run with:
+  #     docker compose -f docker-compose.dev.yml run --rm nats-bootstrap
+  nats-bootstrap:
+    image: natsio/nats-box:0.14.5
+    container_name: soc-triage-nats-bootstrap
+    depends_on:
+      nats:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-lc"]
+    command:
+      - |
+        set -eu
+        # Five global streams, one tenant placeholder. Subjects mirror
+        # services/_runtime/nats_broker.py::STREAM_SPECS exactly.
+        nats --server nats://nats:4222 stream add ALERTS \
+            --subjects 'alerts.v1.>' --retention workq --max-age=24h \
+            --storage file --replicas 1 --discard old --defaults || true
+        nats --server nats://nats:4222 stream add TRIAGE_EVENTS \
+            --subjects 'triage.events.v1.>' --retention interest --max-age=10m \
+            --storage file --replicas 1 --discard old --defaults || true
+        nats --server nats://nats:4222 stream add CONTROL \
+            --subjects 'triage.cancel.v1.>,auth.revocations.v1.>' \
+            --retention interest --max-age=5m \
+            --storage file --replicas 1 --discard old --defaults || true
+        nats --server nats://nats:4222 stream add FEEDBACK \
+            --subjects 'feedback.v1.>' --retention limits --max-age=90d \
+            --storage file --replicas 1 --discard old --defaults || true
+        nats --server nats://nats:4222 stream add DLQ \
+            --subjects 'dlq.v1.>' --retention limits --max-age=7d \
+            --storage file --replicas 1 --discard old --defaults || true
+        echo "✓ streams created"
+
+  # Optional: ClickHouse for OTel trace aggregation. Skip if you already have
+  # one running on the host. The app defaults to OTEL_DISABLED=1 unless you
+  # set OTEL_EXPORTER_OTLP_ENDPOINT in .env.dev.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: soc-triage-clickhouse
+    profiles: ["audit"]
+    ports:
+      - "8123:8123"   # HTTP
+      - "9000:9000"   # native protocol
+    environment:
+      - CLICKHOUSE_DB=soc_otel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Optional: Postgres for AsyncPostgresSaver if a regulated tenant requires
+  # transactional super-step writes. v1 default is AsyncRedisSaver everywhere;
+  # only enable this profile if you have a specific compliance need.
+  postgres:
+    image: postgres:16-alpine
+    container_name: soc-triage-postgres
+    profiles: ["regulated"]
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=soc
+      - POSTGRES_PASSWORD=soc
+      - POSTGRES_DB=soc_checkpoint
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soc -d soc_checkpoint"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  nats_data:
+  redis_data:
+  clickhouse_data:
+  postgres_data:

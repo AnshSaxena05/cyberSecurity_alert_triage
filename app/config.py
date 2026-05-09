@@ -152,6 +152,33 @@ class Settings(BaseSettings):
     api_port: int = 8000
     api_key: str = Field(default="analyse_alert")
 
+    # ------------------------------------------------------------------ #
+    # Architecture-2: NATS event-driven path (off by default; flag enables
+    # the WAL → publish → worker flow and starts the reconciler loop).
+    # ------------------------------------------------------------------ #
+    ingest_via_nats: bool = False
+    nats_url: str = "nats://localhost:4222"
+    nats_creds_path: str = ""           # production only; per-tenant JWT credentials file
+    checkpoint_ttl_sec: int = 30 * 24 * 60 * 60   # 30 days; per-tenant override possible
+    # HS256 service-token secrets are sourced from the Postgres-backed
+    # ``service_secrets`` table (see services/_runtime/secret_store.py).
+    # Override the URL here if the secret store should live in a different
+    # database from the LangGraph checkpointer.
+    secrets_pg_url: str = "postgresql://soc:soc@localhost:5432/soc_checkpoint"
+
+    # Architecture-2: breaking change to /verdict/{alert_id} access. When
+    # false (default during the 30-day deprecation window), the endpoint
+    # remains public but emits a Deprecation header and logs every hit.
+    # When true, the endpoint requires X-API-Key and (if a service JWT is
+    # attached) checks tenant_id against the verdict's tenant_id.
+    verdict_auth_required: bool = False
+    verdict_deprecation_sunset: str = "2026-06-08"   # date to flip the flag
+
+    # Architecture-2: audit-trail retention. Best-effort writes; unaffected
+    # by ingest_via_nats — always-on once Redis is reachable.
+    audit_enabled: bool = True
+    audit_default_ttl_sec: int = 30 * 24 * 60 * 60   # 30 days
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

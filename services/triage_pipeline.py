@@ -99,6 +99,10 @@ class TriageState(TypedDict):
     error: Optional[str]
     # Last agent_think structured decision (boolean); routing also requires tool_calls + budget
     tocontinue: NotRequired[bool]
+    # Set by cancellation checks at LLM-call boundaries. When True, the graph
+    # short-circuits to generate_verdict, which writes a synthesized
+    # ``status="cancelled"`` verdict without consulting the LLM.
+    cancelled: NotRequired[bool]
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +224,25 @@ async def burst_enrichment_node(state: TriageState) -> dict[str, Any]:
     }
 
 
+async def _check_cancelled(state: TriageState) -> bool:
+    """
+    Read ``cancelled:{alert_id}`` from Redis. Skips Redis when no client is
+    available (unit tests run the graph fully in-process).
+    """
+    try:
+        from services._runtime.cancel import CancelRegistry
+
+        # The registry instantiates a Redis client on construction; if Redis
+        # is unreachable, ``is_cancelled`` returns False without raising.
+        reg = CancelRegistry(redis_url=get_settings().redis_url)
+        try:
+            return await reg.is_cancelled(state["alert"].alert_id)
+        finally:
+            await reg.close()
+    except Exception:
+        return False
+
+
 @observe(name="agent_think", as_type="span")
 async def agent_think_node(state: TriageState) -> dict[str, Any]:
     """
@@ -227,6 +250,14 @@ async def agent_think_node(state: TriageState) -> dict[str, Any]:
     ``planned_tools``. ``should_continue_react`` uses ``tocontinue`` plus ``tool_budget`` and
     non-empty ``tool_calls`` on the emitted ``AIMessage`` to route to execute vs verdict.
     """
+    if await _check_cancelled(state):
+        # Short-circuit: skip the LLM call. Routing will see tocontinue=False
+        # and zero tool_budget, so the graph proceeds straight to verdict.
+        return {
+            "cancelled": True,
+            "tocontinue": False,
+            "tool_budget": 0,
+        }
     settings = get_settings()
     from prompts.templates import (
         build_triage_prompt,
@@ -365,6 +396,11 @@ async def execute_tool_node(state: TriageState) -> dict[str, Any]:
     OpenAI may return multiple parallel tool_calls in a single AIMessage and
     requires a ToolMessage for each tool_call_id before the next request.
     """
+    if await _check_cancelled(state):
+        # User left the page mid-investigation. Drop the tool batch on the
+        # floor and route to verdict with a cancelled marker.
+        return {"cancelled": True, "tool_budget": 0}
+
     from agents.enrichment_node import _execute_single_tool, compress_tool_result
     import asyncio
 
@@ -424,7 +460,35 @@ async def generate_verdict_node(state: TriageState) -> dict[str, Any]:
     """
     Final node: LLM generates structured TriageVerdict from all enrichment data.
     Tries local Ollama first; falls back to OpenAI if unavailable.
+
+    Short-circuits when ``state["cancelled"]`` is set: a cancel signal landed
+    while we were running, the user is gone, and we'd be wasting LLM dollars.
+    Instead we synthesize a minimal verdict with ``status="cancelled"``.
     """
+    if state.get("cancelled"):
+        alert = state["alert"]
+        cancelled_verdict = TriageVerdict(
+            alert_id=alert.alert_id,
+            tenant_id=alert.tenant_id,
+            status="cancelled",
+            severity=alert.severity,
+            severity_justification=(
+                "Triage cancelled before completion. The analyst closed the live view "
+                "and a cancel signal arrived during the grace window."
+            ),
+            mitre_assessments=[],
+            triage_summary="Triage was cancelled before a verdict could be generated.",
+            confirmed_iocs=[],
+            immediate_actions=[],
+            escalation=EscalationDecision.MONITOR,
+            escalation_rationale=(
+                "Synthesized cancelled-verdict; no LLM analysis was performed."
+            ),
+            tools_called=state.get("tools_called", []) or [],
+            total_tool_calls=len(state.get("tools_called", []) or []),
+        )
+        return {"verdict": cancelled_verdict, "phase": "done"}
+
     settings = get_settings()
     alert = state["alert"]
     entities = state.get("entities")
@@ -537,8 +601,16 @@ def after_execute_tool(state: TriageState) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_triage_graph() -> Any:
-    """Compile and return the LangGraph StateGraph for SOC triage."""
+def build_triage_graph(checkpointer: Any = None) -> Any:
+    """
+    Compile and return the LangGraph StateGraph for SOC triage.
+
+    When ``checkpointer`` is provided (typically an ``AsyncRedisSaver``
+    from ``services._runtime.checkpoint_redis_ttl``), the compiled graph
+    persists state per ``thread_id`` and a worker that crashes mid-graph
+    can resume on redelivery instead of restarting. Existing in-process
+    callers (tests, demo script) leave it ``None`` for stateless behavior.
+    """
     graph = StateGraph(TriageState)
 
     graph.add_node("normalise", normalise_alert_node)
@@ -573,10 +645,13 @@ def build_triage_graph() -> Any:
     )
     graph.add_edge("generate_verdict", END)
 
+    if checkpointer is not None:
+        return graph.compile(checkpointer=checkpointer)
     return graph.compile()
 
 
-# Singleton compiled graph
+# Singleton compiled graph (checkpointless variant). Workers that need
+# checkpointing call build_triage_graph(checkpointer=...) directly.
 _compiled_graph = None
 
 
@@ -588,11 +663,17 @@ def get_triage_graph() -> Any:
 
 
 @observe(name="soc_triage_pipeline")
-async def run_triage(alert: NormalizedAlert) -> TriageVerdict:
+async def run_triage(
+    alert: NormalizedAlert,
+    *,
+    checkpointer: Any = None,
+) -> TriageVerdict:
     """
     Primary entry point: takes a NormalizedAlert and returns a TriageVerdict.
-    The @observe decorator creates the root Langfuse trace; all child spans
-    (entity extraction, burst enrichment, tool calls, verdict) nest beneath it.
+
+    Pass ``checkpointer`` (an ``AsyncRedisSaver``) to enable state
+    persistence per ``thread_id == alert.alert_id``. Without it, the run
+    is fully stateless — same behavior as before Architecture-2 landed.
     """
     # Attach alert metadata to the trace for filtering in the Langfuse UI
     if is_enabled():
@@ -606,7 +687,11 @@ async def run_triage(alert: NormalizedAlert) -> TriageVerdict:
             except Exception:
                 pass
 
-    graph = get_triage_graph()
+    graph = (
+        build_triage_graph(checkpointer=checkpointer)
+        if checkpointer is not None
+        else get_triage_graph()
+    )
     initial_state: TriageState = {
         "alert": alert,
         "entities": None,
@@ -621,7 +706,15 @@ async def run_triage(alert: NormalizedAlert) -> TriageVerdict:
         "phase": "normalise",
         "error": None,
     }
-    final_state = await graph.ainvoke(initial_state)
+
+    invoke_kwargs: dict[str, Any] = {}
+    if checkpointer is not None:
+        # LangGraph requires a thread_id when a checkpointer is bound. Using
+        # alert_id (sha256 of source:source_alert_id) gives us idempotency:
+        # a NATS redelivery of the same alert resumes the same thread.
+        invoke_kwargs["config"] = {"configurable": {"thread_id": alert.alert_id}}
+
+    final_state = await graph.ainvoke(initial_state, **invoke_kwargs)
     verdict = final_state.get("verdict")
     if verdict is None:
         return _fallback_verdict(final_state, alert, "Graph completed without verdict")

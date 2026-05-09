@@ -1,0 +1,26 @@
+name = "soc-triage-gateway"
+main = "src/index.ts"
+compatibility_date = "2024-11-12"
+compatibility_flags = ["nodejs_compat"]
+
+# One Durable Object class: AnalystSession holds one open WebSocket per
+# (user_id, alert_id) pair. Cloudflare routes connections to the same DO
+# instance for the same name, giving us per-user WS-state isolation.
+[[durable_objects.bindings]]
+name = "ANALYST_SESSION"
+class_name = "AnalystSession"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AnalystSession"]
+
+[vars]
+# Public defaults; override per environment.
+SOC_BFF_BASE_URL = "http://localhost:3000"
+GATEWAY_PUBLIC_URL = "http://localhost:8787"
+
+# Secret bindings (set via `wrangler secret put`):
+#   GATEWAY_SERVICE_TOKEN_SECRET — HS256 secret for audience=gateway, read
+#     from the Postgres service_secrets table. Used to mint service tokens
+#     we send to the BFF (/api/ws/redeem, /api/internal/*) AND to verify
+#     the inbound token the BFF presents on /push.

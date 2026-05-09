@@ -21,26 +21,34 @@ import time
 import uuid
 from typing import Any
 
-import structlog
 import httpx
+import structlog
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from fastapi.openapi.utils import get_openapi
 
-from app.config import get_settings, Settings
+from app._runtime_glue import (
+    attach_verified_service_token,
+    enqueue_via_nats,
+    record_raw_payload,
+)
+from app._runtime_glue import shutdown as _runtime_shutdown
+from app._runtime_glue import startup as _runtime_startup
+from app.config import Settings, get_settings
 from app.models import AlertSource, EscalationDecision, NormalizedAlert, TriageVerdict
 from components.alert_normalizer import normalize_alert
+from observability.cost_tracker import get_cost_tracker
+from observability.feedback import get_feedback_store
+from observability.tracer import get_tracer
 from security.input_guard import (
     check_payload_size,
     sanitise_payload,
     validate_api_key,
 )
 from security.output_filter import scrub_verdict_for_log
-from observability.tracer import get_tracer
-from observability.cost_tracker import get_cost_tracker
-from observability.feedback import get_feedback_store
 from services.alert_persistence import get_alert_persistence
 
 logger = structlog.get_logger(__name__)
@@ -100,6 +108,53 @@ _pipeline_metrics: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
+# Architecture-2 startup/shutdown hooks (no-op when ingest_via_nats=false)
+# ---------------------------------------------------------------------------
+
+
+@app.on_event("startup")
+async def _on_startup() -> None:
+    await _runtime_startup(app, get_settings())
+
+
+@app.on_event("shutdown")
+async def _on_shutdown() -> None:
+    await _runtime_shutdown(app)
+
+
+async def _dispatch_triage(
+    request: Request,
+    alert: NormalizedAlert,
+    background_tasks: BackgroundTasks,
+    tracer: Any,
+    cost_tracker: Any,
+    settings: Settings,
+) -> None:
+    """
+    Route an accepted alert to either the NATS path or the in-process path.
+
+    Gated by ``settings.ingest_via_nats``. When the flag is on AND the
+    runtime is wired, the alert is published to NATS and the worker
+    handles it. Otherwise the existing ``BackgroundTasks`` flow runs.
+    """
+    if settings.ingest_via_nats:
+        try:
+            ok = await enqueue_via_nats(request.app, alert)
+            if ok:
+                return
+        except Exception as exc:
+            # Defence in depth: if the NATS path errors out for any
+            # reason, fall through to in-process so the alert still gets
+            # triaged. Log loudly so operators see the degradation.
+            logger.warning(
+                "ingest_nats_dispatch_failed_fallback_inproc",
+                alert_id=alert.alert_id,
+                error=str(exc),
+            )
+    background_tasks.add_task(_run_triage_background, alert, tracer, cost_tracker)
+
+
+# ---------------------------------------------------------------------------
 # Startup / Shutdown
 # ---------------------------------------------------------------------------
 
@@ -126,8 +181,8 @@ async def startup_event() -> None:
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    from services.context_cache import get_cache
     from observability.langfuse_client import langfuse_flush
+    from services.context_cache import get_cache
 
     await get_cache().close()
     await get_alert_persistence().close()
@@ -225,6 +280,7 @@ async def ingest_batch(
     body: BatchIngestBody,
     request: Request,
     background_tasks: BackgroundTasks,
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     """Ingest many alerts in one request (golden replays, SOAR bulk)."""
     validate_api_key(request)
@@ -252,7 +308,8 @@ async def ingest_batch(
             continue
         await persistence.put_alert(alert)
         await persistence.set_job(alert.alert_id, "queued")
-        background_tasks.add_task(_run_triage_background, alert, tracer, cost_tracker)
+        await record_raw_payload(request.app, alert, payload)
+        await _dispatch_triage(request, alert, background_tasks, tracer, cost_tracker, settings)
         results.append({"ok": True, "alert_id": alert.alert_id, "source": alert_source.value})
 
     accepted = sum(1 for r in results if r.get("ok"))
@@ -293,9 +350,10 @@ async def ingest_alert_auto(
     persistence = get_alert_persistence()
     await persistence.put_alert(alert)
     await persistence.set_job(alert.alert_id, "queued")
+    await record_raw_payload(request.app, alert, payload)
     tracer = get_tracer()
     cost_tracker = get_cost_tracker()
-    background_tasks.add_task(_run_triage_background, alert, tracer, cost_tracker)
+    await _dispatch_triage(request, alert, background_tasks, tracer, cost_tracker, settings)
 
     return {
         "alert_id": alert.alert_id,
@@ -342,9 +400,10 @@ async def ingest_alert(
     persistence = get_alert_persistence()
     await persistence.put_alert(alert)
     await persistence.set_job(alert.alert_id, "queued")
+    await record_raw_payload(request.app, alert, payload)
     tracer = get_tracer()
     cost_tracker = get_cost_tracker()
-    background_tasks.add_task(_run_triage_background, alert, tracer, cost_tracker)
+    await _dispatch_triage(request, alert, background_tasks, tracer, cost_tracker, settings)
 
     logger.info(
         "alert_ingested",
@@ -366,25 +425,149 @@ async def ingest_alert(
 
 
 @app.get("/verdict/{alert_id}")
-async def get_verdict(alert_id: str) -> dict[str, Any]:
-    """Retrieve the triage verdict for a previously ingested alert."""
+async def get_verdict(
+    alert_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    """
+    Retrieve the triage verdict for a previously ingested alert.
+
+    Auth posture (Architecture-2 breaking change):
+      * ``settings.verdict_auth_required = false`` (default during the
+        deprecation window): endpoint remains public. We log every hit
+        and emit a ``Deprecation`` + ``Sunset`` header so callers can
+        adapt before the cutover date.
+      * ``settings.verdict_auth_required = true`` (post-cutover): we
+        require ``X-API-Key`` and (when present) check the verdict's
+        ``tenant_id`` against the request's auth context. Mismatches
+        return 403, not 404, so cross-tenant probes are visible in logs.
+    """
+    # If the BFF forwarded a service JWT, attach the verified context onto
+    # request.state.auth so the cross-tenant check below sees the right
+    # tenant_id. Falls back silently if the request only carries X-API-Key.
+    await attach_verified_service_token(request.app, request)
+
+    auth_attached = bool(
+        request.headers.get("X-API-Key")
+        or request.headers.get("Authorization")
+    )
+
+    if settings.verdict_auth_required:
+        validate_api_key(request)
+    elif not auth_attached:
+        logger.warning(
+            "verdict_unauthenticated_access",
+            alert_id=alert_id,
+            client=request.client.host if request.client else None,
+            sunset=settings.verdict_deprecation_sunset,
+        )
+
     persistence = get_alert_persistence()
     verdict = await persistence.get_verdict(alert_id)
+    headers: dict[str, str] = {}
+    if not settings.verdict_auth_required:
+        headers["Deprecation"] = "true"
+        headers["Sunset"] = settings.verdict_deprecation_sunset
+
     if verdict:
-        return {
-            "alert_id": alert_id,
-            "status": "complete",
-            "verdict": scrub_verdict_for_log(verdict.model_dump()),
-        }
+        # Tenant-claim check: if the request carries a verified service
+        # JWT (request.state.auth set by future BFF middleware), require
+        # tenant_id match. With current API-key-only auth, this is a no-op.
+        verified_tenant = _verified_tenant_id(request)
+        if (
+            settings.verdict_auth_required
+            and verified_tenant is not None
+            and verdict.tenant_id is not None
+            and verified_tenant != verdict.tenant_id
+        ):
+            logger.warning(
+                "verdict_cross_tenant_access_rejected",
+                alert_id=alert_id,
+                requested_by_tenant=verified_tenant,
+                verdict_tenant=verdict.tenant_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="forbidden",
+            )
+        return JSONResponse(
+            content=jsonable_encoder({
+                "alert_id": alert_id,
+                "status": "complete",
+                "verdict": scrub_verdict_for_log(verdict.model_dump()),
+            }),
+            headers=headers,
+        )
     job = await persistence.get_job(alert_id)
     if job and job.get("status") == "failed":
-        return {"alert_id": alert_id, "status": "failed", "error": job.get("error")}
+        return JSONResponse(
+            content=jsonable_encoder(
+                {"alert_id": alert_id, "status": "failed", "error": job.get("error")}
+            ),
+            headers=headers,
+        )
     if await persistence.get_alert(alert_id):
-        return {"alert_id": alert_id, "status": "processing"}
+        return JSONResponse(
+            content={"alert_id": alert_id, "status": "processing"},
+            headers=headers,
+        )
     raise HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"No verdict found for alert_id={alert_id}",
     )
+
+
+def _verified_tenant_id(request: Request) -> str | None:
+    """
+    Read tenant_id from the verified auth context if present.
+
+    Returns None when no service JWT has been attached (the API-key-only
+    path doesn't carry a tenant claim). Reads ONLY from request.state.auth
+    — never from headers or body.
+    """
+    auth = getattr(request.state, "auth", None)
+    if auth is None:
+        return None
+    return getattr(auth, "tenant_id", None)
+
+
+@app.get("/audit/{alert_id}")
+async def get_audit_bundle(alert_id: str, request: Request) -> dict[str, Any]:
+    """
+    Return the audit bundle for an alert: raw payload (always retained)
+    and the LLM coercion trace (if the auto-ingest path used coercion).
+
+    Requires X-API-Key. Future work: gate behind an explicit ``auditor``
+    role rather than the shared API key.
+    """
+    validate_api_key(request)
+    state = getattr(request.app.state, "runtime", None)
+    if state is None or state.audit is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="audit store not configured",
+        )
+
+    persistence = get_alert_persistence()
+    verdict = await persistence.get_verdict(alert_id)
+    coercion_trace_id: str | None = None
+    if verdict is not None:
+        # NormalizedAlert → coercion_trace_id is on the alert, not the verdict.
+        alert = await persistence.get_alert(alert_id)
+        if alert is not None:
+            coercion_trace_id = alert.coercion_trace_id
+
+    bundle = await state.audit.get_bundle(alert_id, coercion_trace_id=coercion_trace_id)
+    if bundle.get("raw_payload") is None and bundle.get("coercion") is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no audit data for alert_id",
+        )
+    bundle["verdict_summary"] = (
+        scrub_verdict_for_log(verdict.model_dump()) if verdict is not None else None
+    )
+    return bundle
 
 
 @app.get("/alert/{alert_id}")
@@ -396,6 +579,54 @@ async def get_alert(alert_id: str, request: Request) -> dict[str, Any]:
     if not alert:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alert not found")
     return alert.model_dump()
+
+
+@app.get("/api/alerts/{alert_id}/snapshot")
+async def get_alert_snapshot(alert_id: str, request: Request) -> dict[str, Any]:
+    """
+    Return the current event-stream snapshot for an alert. Used by the
+    Cloudflare DO before subscribing to NATS — it tells the gateway the
+    last sequence number that has been published, so the subsequent
+    subscribe can use ``OptStartSeq=last_seq+1`` and never lose or
+    duplicate events.
+
+    Auth: requires X-API-Key (or, in production, a service JWT addressed
+    to the gateway audience — wired in Week 4).
+    """
+    validate_api_key(request)
+    persistence = get_alert_persistence()
+
+    # current phase — derived from the verdict if complete, else from the
+    # job table (queued | running | failed). When neither is present, we
+    # report null so the DO can render a "queued" placeholder.
+    verdict = await persistence.get_verdict(alert_id)
+    job = await persistence.get_job(alert_id)
+    current_phase: str | None
+    if verdict is not None:
+        current_phase = "done"
+    elif job is not None:
+        current_phase = job.get("status")
+    else:
+        current_phase = None
+
+    # last_seq comes from the runtime EventSequencer. We read without
+    # advancing — DO will subscribe starting from last_seq + 1.
+    last_seq = 0
+    try:
+        from services._runtime.event_seq import EventSequencer
+
+        # The sequencer is a singleton-by-Redis-URL; constructing here is
+        # cheap (only the redis client is instantiated, no calls go out).
+        seq = EventSequencer(redis_url=get_settings().redis_url)
+        last_seq = await seq.current_seq(alert_id)
+    except Exception as exc:
+        logger.warning("snapshot_seq_read_failed", alert_id=alert_id, error=str(exc))
+
+    return {
+        "alert_id": alert_id,
+        "last_seq": last_seq,
+        "current_phase": current_phase,
+    }
 
 
 @app.get("/jobs/{alert_id}")

@@ -1,0 +1,37 @@
+{
+  "name": "soc-triage-bff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Architecture-2 Backend-for-Frontend — auth router, session store, ingest proxy, WS ticket issuer.",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "seed:admin": "tsx scripts/seed-admin.ts"
+  },
+  "dependencies": {
+    "argon2": "^0.41.1",
+    "ioredis": "^5.4.1",
+    "jose": "^5.9.6",
+    "nats": "^2.29.1",
+    "next": "^14.2.18",
+    "pg": "^8.13.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "server-only": "^0.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.1",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "dotenv": "^16.4.5",
+    "eslint": "^9.15.0",
+    "eslint-config-next": "^14.2.18",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

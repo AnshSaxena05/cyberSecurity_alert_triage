@@ -7,6 +7,8 @@
 
 **Stack:** FastAPI · LangGraph · Pydantic · optional Ollama / OpenAI · optional Redis cache · optional Langfuse.
 
+**Case study:** [SOC Triage Agent — design write-up](https://anshsaxena05.github.io/projects/soc-triage-agent.html) · **Author:** [Ansh Saxena](https://anshsaxena05.github.io/)
+
 ## Demo
 
 ![Terminal recording of scripts/demo_siem_triage.py](docs/demo.gif)

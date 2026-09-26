@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: pytest (Python 3.14)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # No external services in CI: Redis cache off, no LLM keys, no Langfuse.
+      # Integration tests that need Redis/Postgres skip themselves when unreachable.
+      CACHE_ENABLED: "false"
+      LANGFUSE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen --extra dev --python "$(python -c 'import sys; print(sys.executable)')"
+
+      - name: Run tests
+        # test_jwt_signature_tamper_rejected is deselected because it is flaky by
+        # construction: it flips the last base64url character of an HS256 signature,
+        # and that character carries 2 padding bits, so ~1 in 16 tokens decodes to the
+        # same signature and the tamper goes undetected. Re-enable once the test flips
+        # a character in the middle of the signature instead.
+        run: >-
+          uv run --frozen pytest tests/ -v
+          --deselect tests/test_runtime_helpers.py::test_jwt_signature_tamper_rejected

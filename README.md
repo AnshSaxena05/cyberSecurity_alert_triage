@@ -1,8 +1,17 @@
 # SOC Triage Agent
 
+[![CI](https://github.com/AnshSaxena05/cyberSecurity_alert_triage/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnshSaxena05/cyberSecurity_alert_triage/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Agentic SOC alert triage** service: ingest alerts from Splunk, CrowdStrike, AWS GuardDuty (and more), normalise them, enrich via MITRE-routed tools, and produce a structured **`TriageVerdict`** using LangGraph and LLM reasoning.
 
 **Stack:** FastAPI · LangGraph · Pydantic · optional Ollama / OpenAI · optional Redis cache · optional Langfuse.
+
+## Demo
+
+![Terminal recording of scripts/demo_siem_triage.py](docs/demo.gif)
+
+Real output of `scripts/demo_siem_triage.py` run fully **offline**: no `.env`, no API keys, no Redis, no LLM. A Sysmon event (Office spawning an encoded PowerShell) is flattened to a Splunk-shaped webhook, normalised to OCSF, entities are extracted by the heuristic fallback, the MITRE router picks the enrichment tools for `T1059.001`, the burst enrichment runs (connectors are unconfigured, so they report unavailable), and the pipeline degrades to its fallback `TriageVerdict`. When an LLM provider (Ollama or OpenAI) and connector credentials are configured, the agent and verdict steps use LLM reasoning instead of this fallback. Output is trimmed in two places (long JSON blocks) and repeated Langfuse "client disabled" notices are omitted.
 
 ---
 
@@ -249,4 +258,4 @@ Issues and pull requests are welcome. Before opening a PR:
 
 ## License
 
-Add a **`LICENSE`** file at the repository root and state the SPDX identifier here (for example MIT, Apache-2.0, or AGPL-3.0) so downstream users know how they may use and redistribute this open source project.
+Released under the [MIT License](LICENSE). SPDX identifier: `MIT`.

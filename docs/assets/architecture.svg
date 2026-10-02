@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .t { font-size: 15px; fill: #0f172a; }
+      .h { font-size: 13px; fill: #475569; }
+      .b { font-size: 12px; fill: #334155; }
+      .title { font-size: 22px; font-weight: 700; fill: #0f172a; }
+      .box { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; rx: 10; }
+      .det { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.8; rx: 10; }
+      .llm { fill: #eff6ff; stroke: #3b82f6; stroke-width: 1.8; rx: 10; }
+      .grd { fill: #fff7ed; stroke: #f97316; stroke-width: 1.8; rx: 10; }
+      .arrow { stroke: #475569; stroke-width: 1.8; fill: none; marker-end: url(#arr); }
+      .dash { stroke: #64748b; stroke-width: 1.4; fill: none; stroke-dasharray: 6 4; marker-end: url(#arr); }
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#f8fafc"/>
+  <text x="30" y="40" class="title">SOC Triage Agent: deterministic-first, LLM-second</text>
+  <text x="30" y="62" class="h">Open-source agentic alert triage. FastAPI + LangGraph + Pydantic, async tool fan-out, Redis IOC cache, Langfuse tracing.</text>
+
+  <!-- legend -->
+  <rect x="860" y="22" width="16" height="16" class="det"/><text x="882" y="35" class="b">deterministic Python</text>
+  <rect x="860" y="44" width="16" height="16" class="llm"/><text x="882" y="57" class="b">LLM reasoning</text>
+  <rect x="1020" y="22" width="16" height="16" class="grd"/><text x="1042" y="35" class="b">security guard</text>
+  <rect x="1020" y="44" width="16" height="16" class="box"/><text x="1042" y="57" class="b">external system</text>
+
+  <!-- sources -->
+  <rect x="30" y="110" width="170" height="40" class="box"/><text x="115" y="135" class="t" text-anchor="middle">Splunk HEC</text>
+  <rect x="30" y="160" width="170" height="40" class="box"/><text x="115" y="185" class="t" text-anchor="middle">CrowdStrike Falcon</text>
+  <rect x="30" y="210" width="170" height="40" class="box"/><text x="115" y="235" class="t" text-anchor="middle">AWS GuardDuty</text>
+  <rect x="30" y="260" width="170" height="40" class="box"/><text x="115" y="285" class="t" text-anchor="middle">Microsoft Sentinel</text>
+  <text x="115" y="325" class="h" text-anchor="middle">POST /ingest/{source}</text>
+
+  <!-- input guard -->
+  <rect x="250" y="150" width="190" height="110" class="grd"/>
+  <text x="345" y="176" class="t" text-anchor="middle" font-weight="700">input_guard</text>
+  <text x="345" y="198" class="b" text-anchor="middle">API key, 1 MB size limit</text>
+  <text x="345" y="216" class="b" text-anchor="middle">injection-pattern scrub</text>
+  <text x="345" y="234" class="b" text-anchor="middle">before any parsing</text>
+
+  <!-- normalise -->
+  <rect x="490" y="150" width="200" height="110" class="det"/>
+  <text x="590" y="176" class="t" text-anchor="middle" font-weight="700">normalise</text>
+  <text x="590" y="198" class="b" text-anchor="middle">OCSF-aligned NormalizedAlert</text>
+  <text x="590" y="216" class="b" text-anchor="middle">alert_id = sha256(source:id)</text>
+  <text x="590" y="234" class="b" text-anchor="middle">idempotent webhook dedup</text>
+
+  <!-- extract -->
+  <rect x="740" y="150" width="200" height="110" class="llm"/>
+  <text x="840" y="176" class="t" text-anchor="middle" font-weight="700">extract_entities</text>
+  <text x="840" y="198" class="b" text-anchor="middle">small local model, structured</text>
+  <text x="840" y="216" class="b" text-anchor="middle">output (Pydantic-enforced)</text>
+  <text x="840" y="234" class="b" text-anchor="middle">regex fallback when offline</text>
+
+  <!-- route -->
+  <rect x="990" y="150" width="180" height="110" class="det"/>
+  <text x="1080" y="176" class="t" text-anchor="middle" font-weight="700">route_tools</text>
+  <text x="1080" y="198" class="b" text-anchor="middle">MITRE technique to tools</text>
+  <text x="1080" y="216" class="b" text-anchor="middle">O(1) routing table</text>
+  <text x="1080" y="234" class="b" text-anchor="middle">tool budget from severity</text>
+
+  <path d="M200,130 L250,190" class="arrow"/>
+  <path d="M200,180 L250,200" class="arrow"/>
+  <path d="M200,230 L250,215" class="arrow"/>
+  <path d="M200,280 L250,235" class="arrow"/>
+  <path d="M440,205 L490,205" class="arrow"/>
+  <path d="M690,205 L740,205" class="arrow"/>
+  <path d="M940,205 L990,205" class="arrow"/>
+
+  <!-- burst -->
+  <rect x="990" y="330" width="180" height="120" class="det"/>
+  <text x="1080" y="356" class="t" text-anchor="middle" font-weight="700">burst_enrichment</text>
+  <text x="1080" y="378" class="b" text-anchor="middle">asyncio.gather over every</text>
+  <text x="1080" y="396" class="b" text-anchor="middle">routed tool, per-tool timeout</text>
+  <text x="1080" y="414" class="b" text-anchor="middle">graceful degradation</text>
+  <text x="1080" y="432" class="b" text-anchor="middle">results compressed to 200 tok</text>
+  <path d="M1080,260 L1080,330" class="arrow"/>
+
+  <!-- redis -->
+  <rect x="740" y="345" width="190" height="90" class="box"/>
+  <text x="835" y="372" class="t" text-anchor="middle" font-weight="700">Redis IOC cache</text>
+  <text x="835" y="394" class="b" text-anchor="middle">key = sha256(tool + params)</text>
+  <text x="835" y="412" class="b" text-anchor="middle">15 min TTL, optional</text>
+  <path d="M990,390 L930,390" class="dash"/>
+
+  <!-- agent loop -->
+  <rect x="490" y="330" width="200" height="120" class="llm"/>
+  <text x="590" y="356" class="t" text-anchor="middle" font-weight="700">agent_think (ReAct)</text>
+  <text x="590" y="378" class="b" text-anchor="middle">follow-up queries only</text>
+  <text x="590" y="396" class="b" text-anchor="middle">continues only if tocontinue</text>
+  <text x="590" y="414" class="b" text-anchor="middle">AND tool_budget &gt; 0</text>
+  <text x="590" y="432" class="b" text-anchor="middle">budget enforced in Python</text>
+  <path d="M990,443 L690,443" class="arrow"/>
+
+  <rect x="490" y="500" width="200" height="90" class="grd"/>
+  <text x="590" y="526" class="t" text-anchor="middle" font-weight="700">execute_tool</text>
+  <text x="590" y="548" class="b" text-anchor="middle">content_filter first: SPL deny-list,</text>
+  <text x="590" y="566" class="b" text-anchor="middle">SSRF block, hours_back bounds</text>
+  <path d="M570,450 L570,500" class="arrow"/>
+  <path d="M610,500 L610,450" class="arrow"/>
+
+  <!-- verdict -->
+  <rect x="250" y="330" width="190" height="120" class="llm"/>
+  <text x="345" y="356" class="t" text-anchor="middle" font-weight="700">generate_verdict</text>
+  <text x="345" y="378" class="b" text-anchor="middle">security-tuned 8B model</text>
+  <text x="345" y="396" class="b" text-anchor="middle">six-section structured</text>
+  <text x="345" y="414" class="b" text-anchor="middle">TriageVerdict (Pydantic)</text>
+  <path d="M490,390 L440,390" class="arrow"/>
+
+  <rect x="250" y="500" width="190" height="90" class="grd"/>
+  <text x="345" y="526" class="t" text-anchor="middle" font-weight="700">output_filter</text>
+  <text x="345" y="548" class="b" text-anchor="middle">credential and card scrub,</text>
+  <text x="345" y="566" class="b" text-anchor="middle">raw tool output stripped</text>
+  <path d="M345,450 L345,500" class="arrow"/>
+
+  <rect x="30" y="510" width="170" height="70" class="box"/>
+  <text x="115" y="540" class="t" text-anchor="middle" font-weight="700">TriageVerdict</text>
+  <text x="115" y="560" class="b" text-anchor="middle">JSON to the analyst</text>
+  <path d="M250,545 L200,545" class="arrow"/>
+
+  <!-- observability -->
+  <rect x="740" y="500" width="430" height="90" class="box"/>
+  <text x="955" y="526" class="t" text-anchor="middle" font-weight="700">Observability and evaluation</text>
+  <text x="955" y="548" class="b" text-anchor="middle">Langfuse traces, structured logs, per-alert cost tracker,</text>
+  <text x="955" y="566" class="b" text-anchor="middle">analyst feedback capture, golden-alert accuracy harness</text>
+  <path d="M690,545 L740,545" class="dash"/>
+
+  <text x="30" y="650" class="h">Design rule: every structural choice (source, time window, parameters, budget) is made by code in microseconds; the LLM only judges what the evidence means.</text>
+  <text x="30" y="672" class="h">Repo: github.com/AnshSaxena05/cyberSecurity_alert_triage</text>
+</svg>

@@ -9,6 +9,17 @@
 
 **Case study:** [SOC Triage Agent — design write-up](https://anshsaxena05.github.io/projects/soc-triage-agent.html) · **Author:** [Ansh Saxena](https://anshsaxena05.github.io/)
 
+## Architecture at a glance
+
+![SOC Triage Agent architecture: guarded ingest, OCSF normalisation, MITRE-routed burst enrichment, budgeted ReAct loop, verdict](docs/assets/architecture.png)
+
+- **Deterministic first, LLM second.** Code picks the tools, time windows, parameters and call budget; the model only judges what the evidence means. Routing is an O(1) MITRE-technique table, enrichment is an `asyncio` fan-out with per-tool timeouts, and the follow-up loop is bounded by a Python-enforced tool budget.
+- **Durable, idempotent ingest.** A write-ahead log, NATS JetStream publish, per-key exponential backoff, a dead-letter stream, `alert_id` de-duplication and checkpoint resume make delivery at-least-once without duplicate investigations.
+- **Defence in depth.** Input guard, tool-call content filter and output filter wrap the model on both sides.
+- **Observable.** Langfuse traces, structured logs, a per-alert cost tracker, analyst feedback capture and a golden-alert evaluation harness.
+
+Design record: [RFC 0001: deterministic-first triage and at-least-once durable ingest](docs/rfcs/0001-deterministic-first-triage-and-durable-ingest.md). Full reference: [docs/architecture.md](docs/architecture.md).
+
 ## Demo
 
 ![Terminal recording of scripts/demo_siem_triage.py](docs/demo.gif)
@@ -214,13 +225,15 @@ uv run scripts/demo_siem_triage.py
 
 ---
 
-## Docker Compose
+## Docker Compose / How to deploy
 
 Full stack (app + Redis + Ollama) — see `docker-compose.yml`:
 
 ```bash
 docker-compose up -d
 ```
+
+Deploy checklist: copy `.env.example` to `.env`, set `API_KEY`; set `CACHE_ENABLED=false` if you run without Redis; point `OLLAMA_*` or `OPENAI_*` at your model backend; optionally set the Langfuse keys for tracing; check `GET /health` after start-up and send a sample alert as shown under *Pass inputs*.
 
 ---
 

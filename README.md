@@ -274,3 +274,7 @@ Issues and pull requests are welcome. Before opening a PR:
 ## License
 
 Released under the [MIT License](LICENSE). SPDX identifier: `MIT`.
+
+## Author
+
+Built by **Ansh Saxena**, Backend & ML Infrastructure Engineer (Bengaluru, India). [Website](https://anshsaxena05.github.io/) · [LinkedIn](https://www.linkedin.com/in/ansh-saxena-1c) · [Medium](https://medium.com/@anshs5103) · [GitHub](https://github.com/AnshSaxena05)
